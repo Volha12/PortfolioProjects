@@ -1,0 +1,171 @@
+--select data that are going to be used
+
+--SELECT * FROM Portfolio..covid_deaths
+--ORDER BY 3,4
+
+--SELECT * FROM Portfolio..covid_vaccinations
+--ORDER BY 3,4
+
+SELECT continent,
+       LOCATION, 
+	   date, 
+	   total_cases,
+	   new_cases,
+       total_deaths,
+       population
+FROM Portfolio..covid_deaths
+WHERE continent IS NOT NULL
+ORDER BY 3,
+         4;
+
+--Looking at Total Cases vs Total Death
+
+SELECT continent,
+       LOCATION,
+	   date,
+	   total_cases,
+       total_deaths,
+       (total_deaths/total_cases)*100 AS death_percentage
+FROM Portfolio..covid_deaths
+WHERE continent IS NOT NULL
+ORDER BY 1,
+         2;
+
+-- Looking at Total Cases vs Population
+
+SELECT continent,
+       LOCATION, date, total_cases,
+                       population,
+                       (total_cases/population)*100 AS population_infected_percentage
+FROM Portfolio..covid_deaths
+WHERE continent IS NOT NULL
+ORDER BY 1,
+         2;
+
+--Looking at Countries with Highest Infection Rate compared to Population
+
+SELECT continent,
+       LOCATION,
+       population,
+       MAX(total_cases) AS highest_infection_count,
+       MAX((total_cases/population))*100 AS population_infected_percentage
+FROM Portfolio..covid_deaths
+WHERE continent IS NOT NULL
+GROUP BY population,
+         continent,
+         LOCATION
+ORDER BY highest_infection_count DESC;
+
+--Looking at Countries with Highest Death Count per Population
+
+SELECT continent,
+       LOCATION,
+       MAX(CAST(total_deaths AS int)) AS total_deaths_count
+FROM Portfolio..covid_deaths
+WHERE continent IS NOT NULL
+GROUP BY continent,
+         LOCATION
+ORDER BY total_deaths_count DESC;
+
+-- Showing contintents with the highest death count per population
+SELECT continent,
+       MAX(CAST(total_deaths AS int)) AS total_deaths_count
+FROM Portfolio..covid_deaths
+WHERE continent IS NOT NULL
+GROUP BY continent
+ORDER BY total_deaths_count DESC;
+
+-- Global Numbers
+
+SELECT SUM(new_cases) AS new_cases_sum,
+       Sum(CAST(new_deaths AS int)) AS new_deaths_sum,
+       sum(CAST(new_deaths AS int))/sum(new_cases)*100 AS death_percentage
+FROM Portfolio..covid_deaths
+WHERE continent IS NOT NULL
+ORDER BY 1,
+         2;
+
+-- Total Population vs Vaccinations
+-- Shows Percentage of Population that has recieved at least one Covid Vaccine
+
+SELECT dths.continent,
+       dths.location,
+       dths.date,
+       vcs.new_vaccinations,
+       SUM(CAST(vcs.new_vaccinations AS bigint)) OVER (PARTITION BY dths.location
+                                                       ORDER BY dths.location,
+                                                                dths.date) AS rolling_people_vaccinated
+FROM Portfolio..covid_deaths dths
+JOIN Portfolio..covid_vaccinations vcs ON dths.location=vcs.location
+AND dths.date=vcs.date
+WHERE dths.continent IS NOT NULL
+ORDER BY 2,
+         3
+
+--CTE Calculation on partition by from previous query
+
+WITH PopvsVac (Continent, LOCATION, Date, Population, New_Vaccinations, RollingPeopleVaccinated) AS
+  (SELECT dths.continent,
+          dths.location,
+          dths.date,
+          dths.population,
+          vcs.new_vaccinations,
+          SUM(CONVERT(bigint,vcs.new_vaccinations)) OVER (PARTITION BY dths.Location
+                                                          ORDER BY dths.location,
+                                                                   dths.Date) AS rolling_people_vaccinated
+   FROM Portfolio..covid_deaths dths
+   JOIN Portfolio..covid_vaccinations vcs ON dths.location = vcs.location
+   AND dths.date = vcs.date
+   WHERE dths.continent IS NOT NULL )
+SELECT top 100 (RollingPeopleVaccinated/Population)*100
+FROM PopvsVac
+
+
+--temp table
+
+DROP TABLE IF EXISTS #PercentPopulationVaccinated
+CREATE TABLE #PercentPopulationVaccinated 
+(Continent nvarchar(255),
+LOCATION nvarchar(255),
+Date datetime,
+Population numeric,
+New_vaccinations numeric,
+RollingPeopleVaccinated numeric)
+
+INSERT INTO #PercentPopulationVaccinated
+SELECT dths.continent,
+       dths.location,
+       dths.date,
+       dths.population,
+       vcs.new_vaccinations,
+       SUM(CAST(vcs.new_vaccinations AS bigint)) OVER (PARTITION BY dths.location
+                                                       ORDER BY dths.location,
+                                                                dths.date) AS rolling_people_vaccinated
+FROM Portfolio..covid_deaths dths
+JOIN Portfolio..covid_vaccinations vcs 
+ON dths.location=vcs.location
+AND dths.date=vcs.date
+WHERE dths.continent IS NOT NULL
+  
+  SELECT *,
+         (RollingPeopleVaccinated/Population)*100
+  FROM #PercentPopulationVaccinated
+
+
+
+-- Create view
+
+CREATE VIEW PercentPopulationVaccinated AS
+SELECT dths.continent,
+       dths.location,
+       dths.date,
+       dths.population,
+       vcs.new_vaccinations,
+       SUM(CONVERT(bigint,vcs.new_vaccinations)) OVER (PARTITION BY dths.Location
+                                                    ORDER BY dths.location,
+                                                             dths.Date) AS RollingPeopleVaccinated 
+FROM Portfolio..covid_deaths dths
+JOIN Portfolio..covid_vaccinations vcs
+ON dths.location = vcs.location
+AND dths.date = vcs.date
+WHERE dths.continent IS NOT NULL
